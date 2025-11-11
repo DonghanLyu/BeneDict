@@ -3,19 +3,23 @@ import SwiftUI
 @main
 struct BeneDictApp: App {
     
-    // (修改) 1. 创建并管理 AppViewModel
     @State private var viewModel = AppViewModel()
-    
-    // 2. 用于存储来自 URL Scheme 的查询词
     @State private var urlSearchTerm: String?
 
     var body: some Scene {
         WindowGroup {
-            // (修改) 3. 将 viewModel 传递给 ContentView
-            ContentView(viewModel: viewModel, urlSearchTerm: $urlSearchTerm)
-                .onOpenURL { url in
-                    handleIncomingURL(url)
-                }
+            // (修改) 1. 添加 ZStack 作为全局背景
+            ZStack {
+                // 2. 将全局背景色设为浅灰
+                Color(uiColor: .systemGroupedBackground)
+                    .ignoresSafeArea()
+                
+                // 3. 您的 App 内容浮于其上
+                ContentView(viewModel: viewModel, urlSearchTerm: $urlSearchTerm)
+            }
+            .onOpenURL { url in
+                handleIncomingURL(url)
+            }
         }
     }
 
@@ -28,9 +32,7 @@ struct BeneDictApp: App {
         }
 
         if let term = queryItems.first(where: { $0.name == "term" })?.value {
-            // (修改) 4. 通过 viewModel 处理 URL
-            // self.urlSearchTerm = term // <- 旧方式
-            viewModel.showDefinition(for: term) // <- 新方式
+            viewModel.showDefinition(for: term)
         }
     }
 }

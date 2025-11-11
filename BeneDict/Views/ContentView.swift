@@ -81,8 +81,11 @@ struct ContentView: View {
     // MARK: - iPhone 布局 (Compact)
         @ViewBuilder
         private var iPhoneLayout: some View {
+            // (修改) 1. 恢复为单个 NavigationStack
             NavigationStack {
                 ZStack(alignment: .bottom) {
+                    
+                    // (修改) 2. 移除了所有多余的 Color 和 嵌套的 NavigationStack
                     
                     if viewModel.history.isEmpty {
                         VStack {
@@ -121,19 +124,15 @@ struct ContentView: View {
                     
                     // 底部控件 VStack
                     VStack(spacing: 12) {
-                        
-                        // 搜索栏
                         searchBar
-                        
+                            .glassEffect() // <-- 您的 glassEffect 位于此处
                     }
                     .padding()
                 }
                 .navigationTitle(String(localized: "BeneDict"))
-                // (修改) 2. 降低悬浮位置
                 .overlay(alignment: .bottomTrailing) {
                     pasteButton
-                        .padding() // 按钮远离屏幕边缘
-                        // 将按钮上移（值已从 120 降低到 90）
+                        .padding()
                         .padding(.bottom, 90)
                 }
                 .toolbar {
@@ -144,10 +143,11 @@ struct ContentView: View {
                 .sheet(isPresented: $showSettingsSheet) {
                     SettingsView()
                 }
-                .background(Color(uiColor: .systemGroupedBackground))
+                // (修改) 3. 移除此处的 .background()
+                // 因为背景已在 BeneDictApp.swift 中全局设置
             }
         }
-
+    
     @ViewBuilder
     private func historyRow(term: String) -> some View {
         HStack {
@@ -174,7 +174,7 @@ struct ContentView: View {
     private var iPadLayout: some View {
         Text("iPad 布局（未启用）")
     }
-    
+
     // MARK: - 共享组件
 
     private var searchBar: some View {
@@ -222,11 +222,8 @@ struct ContentView: View {
             }
         }
         .padding(12)
-        // (修改) 2. 区分深浅模式设定背景色
-        .background(colorScheme == .dark ? Color(uiColor: .systemGray6) : Color(uiColor: .systemGray5))
-        .clipShape(RoundedRectangle(cornerRadius: 15))
     }
-
+    
         private var pasteButton: some View {
             Button(action: {
                 if let content = UIPasteboard.general.string {

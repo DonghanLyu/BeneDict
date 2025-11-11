@@ -10,13 +10,34 @@ class AppViewModel {
     var searchTerm: String = ""
     var presentedTerm: String? = nil
     var showSettings: Bool = false
-    
-    // (新) Req 3: 用于触发“未找到”弹窗的词
-    // 当这个属性有值时，ContentView 会显示 alert
     var noDefinitionTerm: String? = nil
     
-    var history: [String] = []
-    var favorites: Set<String> = []
+    // (修改) 1. 添加 didSet 属性观察器
+    // 当 history 数组被修改时，自动调用 saveHistory()
+    var history: [String] = [] {
+        didSet {
+            saveHistory()
+        }
+    }
+    
+    // (修改) 2. 添加 didSet 属性观察器
+    // 当 favorites 集合被修改时，自动调用 saveFavorites()
+    var favorites: Set<String> = [] {
+        didSet {
+            saveFavorites()
+        }
+    }
+    
+    // (新) 3. 用于 UserDefaults 的键
+    private let historyKey = "BeneDictHistory"
+    private let favoritesKey = "BeneDictFavorites"
+    
+    // (新) 4. 添加 init() 方法
+    // 当 AppViewModel 第一次被创建时，会从 UserDefaults 加载数据
+    init() {
+        loadHistory()
+        loadFavorites()
+    }
     
     // MARK: - 意图方法
     
@@ -24,19 +45,14 @@ class AppViewModel {
         let term = searchTerm.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return }
         
-        // 检查词典
         if UIReferenceLibraryViewController.dictionaryHasDefinition(forTerm: term) {
             print("执行搜索: \(term) (有效)")
             showSettings = false
             presentedTerm = term
-            addHistory(term: term)
-            
-            // (新) Req 2: 成功后清空搜索栏
+            addHistory(term: term) // 这将触发 history.didSet
             searchTerm = ""
-            
         } else {
             print("执行搜索: \(term) (无效)")
-            // (新) Req 3: 触发“未找到”弹窗
             noDefinitionTerm = term
         }
     }
@@ -46,21 +62,22 @@ class AppViewModel {
         guard !cleanedWord.isEmpty else { return }
 
         if UIReferenceLibraryViewController.dictionaryHasDefinition(forTerm: cleanedWord) {
-            searchTerm = cleanedWord // (注) 点击历史不清空，方便编辑
+            // (注) 这里的逻辑保持不变：
+            // 1. 点击历史记录，searchTerm 会被填充 (方便编辑)
+            // 2. 粘贴或URL跳转，searchTerm 会被填充
+            searchTerm = cleanedWord
             presentedTerm = cleanedWord
             showSettings = false
-            addHistory(term: cleanedWord)
+            addHistory(term: cleanedWord) // 这将触发 history.didSet
             print("显示释义: \(cleanedWord)")
             
-            // (新) Req 2: 成功后清空搜索栏
             // (例外: 如果是从历史记录点击的，不清空)
             if cleanedWord != searchTerm {
-                searchTerm = ""
+                 searchTerm = ""
             }
             
         } else {
             print("显示释义 (无效): \(cleanedWord)")
-            // (新) Req 3: 触发“未找到”弹窗
             noDefinitionTerm = cleanedWord
         }
     }
@@ -79,6 +96,7 @@ class AppViewModel {
         } else {
             favorites.insert(term)
         }
+        // favorites.didSet 将被自动触发
     }
     
     func isFavorite(term: String) -> Bool {
@@ -88,5 +106,32 @@ class AppViewModel {
     private func addHistory(term: String) {
         history.removeAll { $0 == term }
         history.insert(term, at: 0)
+        // history.didSet 将被自动触发
+    }
+    
+    // (新) 5. 添加用于数据持久化的辅助方法
+    
+    // MARK: - Persistence (UserDefaults)
+    
+    private func saveHistory() {
+        // 将 history 数组存入 UserDefaults
+        UserDefaults.standard.set(history, forKey: historyKey)
+    }
+    
+    private func loadHistory() {
+        // 从 UserDefaults 加载 [String] 数组，如果不存在则默认为空数组
+        self.history = UserDefaults.standard.array(forKey: historyKey) as? [String] ?? []
+    }
+    
+    private func saveFavorites() {
+        // UserDefaults 不能直接存 Set，先转为 Array
+        let favoritesArray = Array(favorites)
+        UserDefaults.standard.set(favoritesArray, forKey: favoritesKey)
+    }
+    
+    private func loadFavorites() {
+        // 加载 Array，再转回 Set
+        let favoritesArray = UserDefaults.standard.array(forKey: favoritesKey) as? [String] ?? []
+        self.favorites = Set(favoritesArray)
     }
 }
