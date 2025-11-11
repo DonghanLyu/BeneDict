@@ -1,118 +1,375 @@
 import SwiftUI
-import Observation // 修正点: 导入 Observation 框架
+import UniformTypeIdentifiers
+import Speech
 
-/**
- * ContentView
- *
- * 这是应用的根视图。
- * 它的核心职责是利用 @Environment(\.horizontalSizeClass) 来检测当前的设备环境
- * (例如，是 iPhone 还是 iPad)，然后选择性地渲染两种截然不同的布局：
- * 1. `PhoneLayout`：针对 iPhone 的紧凑布局。
- * 2. `PadLayout`：针对 iPad 的分栏布局 (NavigationSplitView)。
- *
- * --- 修正说明 ---
- * 1. (保持) 将 `@Environment(AppViewModel.self) private var viewModel` 移至 ContentView 的顶层属性。
- * 2. (保持) 将 `PhoneLayout` 和 `PadLayout` 更改为 `private var` (计算属性)。
- * 3. (新增) 添加 `import Observation`，以确保 @Environment 能正确识别 AppViewModel 为 @Observable 类型。
- * -----------------
- */
 struct ContentView: View {
-    // 从环境中获取 horizontalSizeClass，用于判断设备类型。
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.horizontalSizeClass) var sizeClass
+    @Environment(\.openURL) var openURL
     
-    // 从环境中获取 ViewModel (现在可以正确识别 AppViewModel 类型)
-    @Environment(AppViewModel.self) private var viewModel
-
-    // 计算属性，判断当前是否为 iPad 布局
-    private var isPad: Bool {
-        horizontalSizeClass == .regular
-    }
+    @Bindable var viewModel: AppViewModel
+    @Binding var urlSearchTerm: String?
+    
+    @State private var showSettingsSheet = false
+    @FocusState private var isSearchFieldFocused: Bool
+    @State private var isTargeted = false
+    
+    @State private var speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "zh-CN"))
+    @State private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
+    @State private var recognitionTask: SFSpeechRecognitionTask?
+    @State private var audioEngine = AVAudioEngine()
+    @State private var isListening = false
 
     var body: some View {
-        // 根据设备类型动态选择布局
-        if isPad {
-            PadLayout
-        } else {
-            PhoneLayout
+        Group {
+            if sizeClass == .compact {
+                iPhoneLayout
+            } else {
+                iPadLayout
+            }
+        }
+        .onDrop(of: [UTType.plainText], isTargeted: $isTargeted) { providers in
+            handleDrop(providers: providers)
+            return true
+        }
+        .onChange(of: urlSearchTerm) { oldValue, newValue in
+            if let term = newValue {
+                viewModel.showDefinition(for: term)
+                self.urlSearchTerm = nil
+            }
+        }
+        .onAppear {
+            self.isSearchFieldFocused = true
+            requestSpeechAuthorization()
+        }
+        .sheet(isPresented: .init(
+            get: {
+                viewModel.presentedTerm != nil
+            },
+            set: { isActive in
+                if !isActive {
+                    viewModel.presentedTerm = nil
+                }
+            }
+        ), onDismiss: {
+            self.isSearchFieldFocused = true
+        }) {
+            if let term = viewModel.presentedTerm {
+                DefinitionView(term: term)
+                    .presentationDragIndicator(.visible)
+            }
+        }
+        .alert(
+            "未找到",
+            isPresented: .init(
+                get: { viewModel.noDefinitionTerm != nil },
+                set: { _ in viewModel.noDefinitionTerm = nil }
+            ),
+            presenting: viewModel.noDefinitionTerm
+        ) { term in
+            Button("搜索网页 (Bing)") {
+                searchWeb(for: term)
+            }
+            Button("取消", role: .cancel) {}
+        } message: { term in
+            Text("本地词典中未找到 \"\(term)\"。")
         }
     }
-    
-    // MARK: - 视图构建器 (ViewBuilders)
-    
-    /**
-     * 详情视图构建器
-     *
-     * 这是一个可复用的 @ViewBuilder 函数，用于构建显示在
-     * iPhone 主区域或 iPad 详情栏的内容。
-     */
-    @ViewBuilder
-    private func DetailView() -> some View {
-        // (ViewModel 已移至顶层，此处无需声明)
-        
-        if viewModel.showSettings {
-            // 状态 1: 显示设置
-            SettingsView()
-        } else if let term = viewModel.presentedTerm {
-            // 状态 2: 显示词典释义
-            DefinitionView(term: term)
-                .id(term)
-                .ignoresSafeArea()
-        } else {
-            // 状态 3: 默认占位符
-            ContentUnavailableView {
-                Label(
-                    String(localized: "ipad_placeholder_title", comment: "iPad placeholder title"),
+
+    // MARK: - iPhone 布局 (Compact)
+        @ViewBuilder
+        private var iPhoneLayout: some View {
+            NavigationStack {
+                ZStack(alignment: .bottom) {
                     
-                    // 修正点:
-                    // 1. 移除了 String(localized: "...")
-                    // 2. 直接使用 SF Symbol 的系统名称。
-                    //    这是一个不应被本地化的开发者字符串。
-                    //    这修复了 'No symbol named...' 构建错误。
-                    systemImage: "rectangle.and.text.magnifyingglass"
-                )
-            }
-            .symbolVariant(.fill)
-        }
-    }
-
-    // MARK: - 布局 (Layouts)
-
-    /**
-     * PhoneLayout (计算属性)
-     *
-     * 专为 iPhone 设计的布局。
-     * 使用 ZStack 将主搜索界面 (MainInterfaceView) 浮动在
-     * 详情内容 (DetailView) 的底部。
-     */
-    private var PhoneLayout: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                // 1. 背景内容 (释义或占位符)
-                DetailView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
-                // 2. 浮动在底部的搜索界面
-                MainInterfaceView(isOverlay: true)
-            }
-            .navigationTitle("BeneDict")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-
-    /**
-     * PadLayout (计算属性)
-     *
-     * 专为 iPad 设计的布局。
-     * 使用 NavigationSplitView 实现 1/2 + 1/2 的分栏效果。
-     */
-    private var PadLayout: some View {
-        NavigationSplitView {
-            // 1. 侧边栏 (Sidebar)
-            MainInterfaceView(isOverlay: false)
+                    if viewModel.history.isEmpty {
+                        // Placeholder
+                        VStack {
+                            Image(systemName: "book.closed")
+                                .font(.system(size: 80))
+                                .foregroundStyle(.gray.opacity(0.1))
+                            Text(String(localized: "BeneDict"))
+                                .font(.title)
+                                .fontWeight(.bold)
+                                .foregroundStyle(.gray.opacity(0.3))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        // 历史列表
+                        List {
+                            let favoritedItems = viewModel.history.filter { viewModel.isFavorite(term: $0) }
+                            if !favoritedItems.isEmpty {
+                                Section {
+                                    ForEach(favoritedItems, id: \.self) { term in
+                                        historyRow(term: term)
+                                    }
+                                }
+                            }
+                            
+                            let otherHistory = viewModel.history.filter { !viewModel.isFavorite(term: $0) }
+                            if !otherHistory.isEmpty {
+                                Section {
+                                    ForEach(otherHistory, id: \.self) { term in
+                                        historyRow(term: term)
+                                    }
+                                }
+                            }
+                        }
+                        .listStyle(.insetGrouped)
+                        .padding(.bottom, 120)
+                    }
+                    
+                    // (修改) 1. 重新组织底部控件
+                    VStack(spacing: 12) { // <-- 这个 spacing 就是您要的 ()spacing
+                        
+                        // (修改) 2. 图标 HStake 现在是独立的
+                        HStack(spacing: 20) {
+                            pasteButton
+                            settingsButton(isSheet: true)
+                            Spacer()
+                        }
+                        .padding(.horizontal) // 图标的水平内边距
+                        
+                        // (修改) 3. 搜索栏及其背景现在在独立的 VStack 中
+                        VStack {
+                            searchBar
+                        }
+//                        .padding() // 搜索栏气泡的内边距
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+//                        .shadow(color: .black.opacity(0.1), radius: 10, y: -5)
+                        
+                    }
+                    .padding() // 整个底部控件组的外边距
+                }
                 .navigationTitle("BeneDict")
-        } detail: {
-            // 2. 详情栏 (Detail)
-            DetailView()
+                .sheet(isPresented: $showSettingsSheet) {
+                    SettingsView()
+                }
+            }
         }
+
+    @ViewBuilder
+    private func historyRow(term: String) -> some View {
+        HStack {
+            Text(term)
+                .font(.body)
+            
+            Spacer()
+            
+            Button {
+                viewModel.toggleFavorite(term: term)
+            } label: {
+                Image(systemName: viewModel.isFavorite(term: term) ? "star.fill" : "star")
+                    .foregroundStyle(viewModel.isFavorite(term: term) ? Color.yellow : Color.gray.opacity(0.5))
+            }
+            .buttonStyle(.borderless)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            viewModel.showDefinition(for: term)
+        }
+    }
+
+    @ViewBuilder
+    private var iPadLayout: some View {
+        Text("iPad 布局（未启用）")
+    }
+    
+    // MARK: - 共享组件
+    private var searchBar: some View {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                
+                TextField(String(localized: "请输入内容开始查询"), text: $viewModel.searchTerm)
+                    .onSubmit {
+                        if isListening {
+                            stopListening()
+                        }
+                        viewModel.performSearch()
+                    }
+                    .focused($isSearchFieldFocused)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                
+                if !viewModel.searchTerm.isEmpty {
+                    Button(action: {
+                        viewModel.searchTerm = ""
+                        isSearchFieldFocused = true
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                // (修改) 1. 切换听写按钮的逻辑
+                Button {
+                    if isListening {
+                        stopListening()
+                    } else {
+                        startListening()
+                    }
+                } label: {
+                    // (修改) 2. 使用 if/else 来切换图标和动画
+                    if isListening {
+                        // (新) 当在听写时，显示波形图并应用动画
+                        Image(systemName: "waveform")
+                            .foregroundStyle(.orange)
+                            .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isListening)
+                    } else {
+                        // (旧) 不在听写时，显示静态麦克风
+                        Image(systemName: "microphone")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(uiColor: .systemGray6))
+            .clipShape(RoundedRectangle(cornerRadius: 15))
+        }
+
+    private var pasteButton: some View {
+        Button(action: {
+            if let content = UIPasteboard.general.string {
+                let sanitized = content
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .prefix(100)
+                if !sanitized.isEmpty {
+                    viewModel.showDefinition(for: String(sanitized))
+                }
+            }
+        }) {
+            Image(systemName: "doc.on.clipboard")
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel(String(localized: "粘贴"))
+    }
+    
+    private func settingsButton(isSheet: Bool) -> some View {
+        Button(action: {
+            if isSheet {
+                showSettingsSheet = true
+            } else {
+                viewModel.showSettingsView()
+            }
+        }) {
+            Image(systemName: "gearshape")
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .accessibilityLabel(String(localized: "设置"))
+    }
+
+    // MARK: - 逻辑
+    
+    private func submitSearch(term: String) {
+        let trimmedTerm = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTerm.isEmpty else { return }
+        isSearchFieldFocused = false
+        viewModel.performSearch()
+    }
+    
+    private func handleDrop(providers: [NSItemProvider]) {
+        guard let provider = providers.first else { return }
+        _ = provider.loadObject(ofClass: String.self) { object, error in
+            DispatchQueue.main.async {
+                if let droppedText = object as? String {
+                    let sanitized = droppedText
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .prefix(100)
+                    if !sanitized.isEmpty {
+                        viewModel.showDefinition(for: String(sanitized))
+                    }
+                }
+            }
+        }
+    }
+    
+    private func searchWeb(for term: String) {
+        guard let encodedTerm = term.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+              let url = URL(string: "https://www.bing.com/search?q=define%3A\(encodedTerm)") else {
+            return
+        }
+        openURL(url)
+    }
+    
+    private func requestSpeechAuthorization() {
+        SFSpeechRecognizer.requestAuthorization { authStatus in
+            OperationQueue.main.addOperation {
+                if authStatus == .authorized {
+                    AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                        // 麦克风权限
+                    }
+                }
+            }
+        }
+    }
+    
+    private func startListening() {
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized,
+              AVAudioSession.sharedInstance().recordPermission == .granted else {
+            print("权限未授予")
+            return
+        }
+        
+        if let recognitionTask = recognitionTask {
+            recognitionTask.cancel()
+            self.recognitionTask = nil
+        }
+        
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("音频会话设置失败: \(error)")
+            return
+        }
+        
+        recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
+        guard let recognitionRequest = recognitionRequest else {
+            fatalError("无法创建 SFSpeechAudioBufferRecognitionRequest")
+        }
+        recognitionRequest.shouldReportPartialResults = true
+        
+        let inputNode = audioEngine.inputNode
+        
+        recognitionTask = speechRecognizer?.recognitionTask(with: recognitionRequest) { result, error in
+            var isFinal = false
+            
+            if let result = result {
+                self.viewModel.searchTerm = result.bestTranscription.formattedString
+                isFinal = result.isFinal
+            }
+            
+            if error != nil || isFinal {
+                // (修改) Req 2: 语音结束时，停止引擎，但*不*自动搜索
+                self.audioEngine.stop()
+                inputNode.removeTap(onBus: 0)
+                
+                self.recognitionRequest = nil
+                self.recognitionTask = nil
+                self.isListening = false
+            }
+        }
+        
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
+            self.recognitionRequest?.append(buffer)
+        }
+        
+        audioEngine.prepare()
+        
+        do {
+            try audioEngine.start()
+            self.isListening = true
+        } catch {
+            print("audioEngine 启动失败: \(error)")
+        }
+    }
+    
+    private func stopListening() {
+        audioEngine.stop()
+        recognitionRequest?.endAudio() // 这将触发 recognitionTask 的 isFinal
+        self.isListening = false
     }
 }
