@@ -6,6 +6,9 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) var sizeClass
     @Environment(\.openURL) var openURL
     
+    // (新) 2. 引入 colorScheme 以便在 searchBar 中使用
+    @Environment(\.colorScheme) var colorScheme
+    
     @Bindable var viewModel: AppViewModel
     @Binding var urlSearchTerm: String?
     
@@ -82,19 +85,17 @@ struct ContentView: View {
                 ZStack(alignment: .bottom) {
                     
                     if viewModel.history.isEmpty {
-                        // Placeholder
                         VStack {
-                            Image(systemName: "book.closed")
+                            Image(systemName: "character.book.closed.fill")
                                 .font(.system(size: 80))
                                 .foregroundStyle(.gray.opacity(0.1))
-                            Text(String(localized: "BeneDict"))
+                            Text(String(localized: "书山有路勤为径"))
                                 .font(.title)
                                 .fontWeight(.bold)
                                 .foregroundStyle(.gray.opacity(0.3))
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        // 历史列表
                         List {
                             let favoritedItems = viewModel.history.filter { viewModel.isFavorite(term: $0) }
                             if !favoritedItems.isEmpty {
@@ -118,33 +119,32 @@ struct ContentView: View {
                         .padding(.bottom, 120)
                     }
                     
-                    // (修改) 1. 重新组织底部控件
-                    VStack(spacing: 12) { // <-- 这个 spacing 就是您要的 ()spacing
+                    // 底部控件 VStack
+                    VStack(spacing: 12) {
                         
-                        // (修改) 2. 图标 HStake 现在是独立的
-                        HStack(spacing: 20) {
-                            pasteButton
-                            settingsButton(isSheet: true)
-                            Spacer()
-                        }
-                        .padding(.horizontal) // 图标的水平内边距
-                        
-                        // (修改) 3. 搜索栏及其背景现在在独立的 VStack 中
-                        VStack {
-                            searchBar
-                        }
-//                        .padding() // 搜索栏气泡的内边距
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-//                        .shadow(color: .black.opacity(0.1), radius: 10, y: -5)
+                        // 搜索栏
+                        searchBar
                         
                     }
-                    .padding() // 整个底部控件组的外边距
+                    .padding()
                 }
-                .navigationTitle("BeneDict")
+                .navigationTitle(String(localized: "BeneDict"))
+                // (修改) 2. 降低悬浮位置
+                .overlay(alignment: .bottomTrailing) {
+                    pasteButton
+                        .padding() // 按钮远离屏幕边缘
+                        // 将按钮上移（值已从 120 降低到 90）
+                        .padding(.bottom, 90)
+                }
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        settingsButton(isSheet: true)
+                    }
+                }
                 .sheet(isPresented: $showSettingsSheet) {
                     SettingsView()
                 }
+                .background(Color(uiColor: .systemGroupedBackground))
             }
         }
 
@@ -176,74 +176,75 @@ struct ContentView: View {
     }
     
     // MARK: - 共享组件
+
     private var searchBar: some View {
-            HStack(spacing: 12) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                
-                TextField(String(localized: "请输入内容开始查询"), text: $viewModel.searchTerm)
-                    .onSubmit {
-                        if isListening {
-                            stopListening()
-                        }
-                        viewModel.performSearch()
-                    }
-                    .focused($isSearchFieldFocused)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-                
-                if !viewModel.searchTerm.isEmpty {
-                    Button(action: {
-                        viewModel.searchTerm = ""
-                        isSearchFieldFocused = true
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                
-                // (修改) 1. 切换听写按钮的逻辑
-                Button {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+            
+            TextField(String(localized: "请输入内容开始查询"), text: $viewModel.searchTerm)
+                .onSubmit {
                     if isListening {
                         stopListening()
-                    } else {
-                        startListening()
                     }
-                } label: {
-                    // (修改) 2. 使用 if/else 来切换图标和动画
-                    if isListening {
-                        // (新) 当在听写时，显示波形图并应用动画
-                        Image(systemName: "waveform")
-                            .foregroundStyle(.orange)
-                            .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isListening)
-                    } else {
-                        // (旧) 不在听写时，显示静态麦克风
-                        Image(systemName: "microphone")
-                            .foregroundStyle(.secondary)
-                    }
+                    viewModel.performSearch()
+                }
+                .submitLabel(.search)
+                .focused($isSearchFieldFocused)
+                .textFieldStyle(.plain)
+                .autocorrectionDisabled()
+            
+            if !viewModel.searchTerm.isEmpty {
+                Button(action: {
+                    viewModel.searchTerm = ""
+                    isSearchFieldFocused = true
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(.secondary)
                 }
             }
-            .padding(12)
-            .background(Color(uiColor: .systemGray6))
-            .clipShape(RoundedRectangle(cornerRadius: 15))
-        }
-
-    private var pasteButton: some View {
-        Button(action: {
-            if let content = UIPasteboard.general.string {
-                let sanitized = content
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .prefix(100)
-                if !sanitized.isEmpty {
-                    viewModel.showDefinition(for: String(sanitized))
+            
+            Button {
+                if isListening {
+                    stopListening()
+                } else {
+                    startListening()
+                }
+            } label: {
+                if isListening {
+                    Image(systemName: "waveform")
+                        .foregroundColor(.orange)
+                        .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isListening)
+                } else {
+                    Image(systemName: "microphone")
+                        .foregroundColor(.secondary)
                 }
             }
-        }) {
-            Image(systemName: "doc.on.clipboard")
-                .frame(minWidth: 44, minHeight: 44)
         }
-        .accessibilityLabel(String(localized: "粘贴"))
+        .padding(12)
+        // (修改) 2. 区分深浅模式设定背景色
+        .background(colorScheme == .dark ? Color(uiColor: .systemGray6) : Color(uiColor: .systemGray5))
+        .clipShape(RoundedRectangle(cornerRadius: 15))
     }
+
+        private var pasteButton: some View {
+            Button(action: {
+                if let content = UIPasteboard.general.string {
+                    let sanitized = content
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .prefix(100)
+                    if !sanitized.isEmpty {
+                        viewModel.showDefinition(for: String(sanitized))
+                    }
+                }
+            }) {
+                Image(systemName: "document.on.clipboard")
+                    .padding() // 增加内边距
+                    .foregroundColor(.primary) // .foregroundStyle() 实现强行定义 .black 等色彩将仅改变 SF Symbols 的背景色，前景层级不会改变
+                    .glassEffect()
+            }
+            .accessibilityLabel(String(localized: "粘贴"))
+        }
     
     private func settingsButton(isSheet: Bool) -> some View {
         Button(action: {
@@ -297,7 +298,6 @@ struct ContentView: View {
             OperationQueue.main.addOperation {
                 if authStatus == .authorized {
                     AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                        // 麦克风权限
                     }
                 }
             }
@@ -342,7 +342,6 @@ struct ContentView: View {
             }
             
             if error != nil || isFinal {
-                // (修改) Req 2: 语音结束时，停止引擎，但*不*自动搜索
                 self.audioEngine.stop()
                 inputNode.removeTap(onBus: 0)
                 
@@ -369,7 +368,7 @@ struct ContentView: View {
     
     private func stopListening() {
         audioEngine.stop()
-        recognitionRequest?.endAudio() // 这将触发 recognitionTask 的 isFinal
+        recognitionRequest?.endAudio()
         self.isListening = false
     }
 }
