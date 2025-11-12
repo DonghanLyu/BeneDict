@@ -11,8 +11,8 @@ struct BeneDictApp: App {
             // (修改) 1. 添加 ZStack 作为全局背景
             ZStack {
                 // 2. 将全局背景色设为浅灰
-                Color(uiColor: .systemGroupedBackground)
-                    .ignoresSafeArea()
+                Color(uiColor: .systemBackground)
+                    .ignoresSafeArea(.keyboard)
                 
                 // 3. 您的 App 内容浮于其上
                 ContentView(viewModel: viewModel, urlSearchTerm: $urlSearchTerm)

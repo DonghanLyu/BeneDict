@@ -5,8 +5,6 @@ import Speech
 struct ContentView: View {
     @Environment(\.horizontalSizeClass) var sizeClass
     @Environment(\.openURL) var openURL
-    
-    // (新) 2. 引入 colorScheme 以便在 searchBar 中使用
     @Environment(\.colorScheme) var colorScheme
     
     @Bindable var viewModel: AppViewModel
@@ -77,15 +75,12 @@ struct ContentView: View {
             Text("本地词典中未找到 \"\(term)\"。")
         }
     }
-
+    
     // MARK: - iPhone 布局 (Compact)
         @ViewBuilder
         private var iPhoneLayout: some View {
-            // (修改) 1. 恢复为单个 NavigationStack
             NavigationStack {
                 ZStack(alignment: .bottom) {
-                    
-                    // (修改) 2. 移除了所有多余的 Color 和 嵌套的 NavigationStack
                     
                     if viewModel.history.isEmpty {
                         VStack {
@@ -99,33 +94,28 @@ struct ContentView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        List {
-                            let favoritedItems = viewModel.history.filter { viewModel.isFavorite(term: $0) }
-                            if !favoritedItems.isEmpty {
-                                Section {
-                                    ForEach(favoritedItems, id: \.self) { term in
-                                        historyRow(term: term)
-                                    }
+                        ScrollView {
+                            VStack(spacing: 15) {
+                                let favoritedItems = viewModel.history.filter { viewModel.isFavorite(term: $0) }
+                                if !favoritedItems.isEmpty {
+                                    HistorySectionView(title: "收藏夹", items: favoritedItems)
+                                }
+                                
+                                let otherHistory = viewModel.history.filter { !viewModel.isFavorite(term: $0) }
+                                if !otherHistory.isEmpty {
+                                    HistorySectionView(title: "历史记录", items: otherHistory)
                                 }
                             }
-                            
-                            let otherHistory = viewModel.history.filter { !viewModel.isFavorite(term: $0) }
-                            if !otherHistory.isEmpty {
-                                Section {
-                                    ForEach(otherHistory, id: \.self) { term in
-                                        historyRow(term: term)
-                                    }
-                                }
-                            }
+                            .padding()
+                            .padding(.bottom, 120)
                         }
-                        .listStyle(.insetGrouped)
-                        .padding(.bottom, 120)
+                        .scrollContentBackground(.hidden)
                     }
                     
                     // 底部控件 VStack
                     VStack(spacing: 12) {
                         searchBar
-                            .glassEffect() // <-- 您的 glassEffect 位于此处
+                            .glassEffect()
                     }
                     .padding()
                 }
@@ -143,86 +133,161 @@ struct ContentView: View {
                 .sheet(isPresented: $showSettingsSheet) {
                     SettingsView()
                 }
-                // (修改) 3. 移除此处的 .background()
-                // 因为背景已在 BeneDictApp.swift 中全局设置
+            }
+        }
+
+        @ViewBuilder
+        private func HistorySectionView(title: String, items: [String]) -> some View {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 16)
+                    .padding(.bottom, 4)
+
+                VStack(spacing: 0) {
+                    ForEach(items, id: \.self) { term in
+                        historyRow(term: term)
+                        if term != items.last {
+                            Divider()
+                                .padding(.leading, 16)
+                        }
+                    }
+                }
+                .background(Color(uiColor: .systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+
+        @ViewBuilder
+        private func historyRow(term: String) -> some View {
+            HStack {
+                Text(term)
+                    .font(.body)
+                
+                Spacer()
+                
+                Button {
+                    viewModel.toggleFavorite(term: term)
+                } label: {
+                    Image(systemName: viewModel.isFavorite(term: term) ? "star.fill" : "star")
+                        .foregroundStyle(viewModel.isFavorite(term: term) ? Color.yellow : Color.gray.opacity(0.5))
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                viewModel.showDefinition(for: term)
             }
         }
     
-    @ViewBuilder
-    private func historyRow(term: String) -> some View {
-        HStack {
-            Text(term)
-                .font(.body)
-            
-            Spacer()
-            
-            Button {
-                viewModel.toggleFavorite(term: term)
-            } label: {
-                Image(systemName: viewModel.isFavorite(term: term) ? "star.fill" : "star")
-                    .foregroundStyle(viewModel.isFavorite(term: term) ? Color.yellow : Color.gray.opacity(0.5))
-            }
-            .buttonStyle(.borderless)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            viewModel.showDefinition(for: term)
-        }
-    }
-
+    
     @ViewBuilder
     private var iPadLayout: some View {
         Text("iPad 布局（未启用）")
     }
 
+
     // MARK: - 共享组件
 
-    private var searchBar: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
-            
-            TextField(String(localized: "请输入内容开始查询"), text: $viewModel.searchTerm)
-                .onSubmit {
+        private var searchBar: some View {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+                
+                TextField(String(localized: "请输入内容开始查询"), text: $viewModel.searchTerm)
+                    .onSubmit {
+                        if isListening {
+                            stopListening()
+                        }
+                        viewModel.performSearch()
+                    }
+                    .submitLabel(.search)
+                    .focused($isSearchFieldFocused)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                
+                if !viewModel.searchTerm.isEmpty {
+                    Button(action: {
+                        viewModel.searchTerm = ""
+                        isSearchFieldFocused = true
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Button {
                     if isListening {
                         stopListening()
+                    } else {
+                        startListening()
                     }
-                    viewModel.performSearch()
-                }
-                .submitLabel(.search)
-                .focused($isSearchFieldFocused)
-                .textFieldStyle(.plain)
-                .autocorrectionDisabled()
-            
-            if !viewModel.searchTerm.isEmpty {
-                Button(action: {
-                    viewModel.searchTerm = ""
-                    isSearchFieldFocused = true
-                }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+                } label: {
+                    if isListening {
+                        Image(systemName: "waveform")
+                            .foregroundColor(.orange)
+                            .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isListening)
+                    } else {
+                        Image(systemName: "microphone")
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
-            
-            Button {
-                if isListening {
-                    stopListening()
-                } else {
-                    startListening()
-                }
-            } label: {
-                if isListening {
-                    Image(systemName: "waveform")
-                        .foregroundColor(.orange)
-                        .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isListening)
-                } else {
-                    Image(systemName: "microphone")
-                        .foregroundColor(.secondary)
-                }
-            }
+            .padding(12)
         }
-        .padding(12)
-    }
+    
+//    // MARK: - 共享组件
+//
+//    private var searchBar: some View {
+//        HStack(spacing: 12) {
+//            Image(systemName: "magnifyingglass")
+//                .foregroundColor(.secondary)
+//            
+//            TextField(String(localized: "请输入内容开始查询"), text: $viewModel.searchTerm)
+//                .onSubmit {
+//                    if isListening {
+//                        stopListening()
+//                    }
+//                    viewModel.performSearch()
+//                }
+//                .submitLabel(.search)
+//                .focused($isSearchFieldFocused)
+//                .textFieldStyle(.plain)
+//                .autocorrectionDisabled()
+//            
+//            if !viewModel.searchTerm.isEmpty {
+//                Button(action: {
+//                    viewModel.searchTerm = ""
+//                    isSearchFieldFocused = true
+//                }) {
+//                    Image(systemName: "xmark.circle.fill")
+//                        .foregroundColor(.secondary)
+//                }
+//            }
+//            
+//            Button {
+//                if isListening {
+//                    stopListening()
+//                } else {
+//                    startListening()
+//                }
+//            } label: {
+//                if isListening {
+//                    Image(systemName: "waveform")
+//                        .foregroundColor(.orange)
+//                        .symbolEffect(.variableColor.iterative, options: .repeating, isActive: isListening)
+//                } else {
+//                    Image(systemName: "microphone")
+//                        .foregroundColor(.secondary)
+//                }
+//            }
+//        }
+//        .padding(12)
+//    }
     
         private var pasteButton: some View {
             Button(action: {
